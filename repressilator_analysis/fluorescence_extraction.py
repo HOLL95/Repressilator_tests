@@ -1,0 +1,218 @@
+"""
+Fluorescence extraction utilities for Repressilator analysis.
+
+This module provides functions to segment cells from phase contrast images
+and extract fluorescence intensity values for each cell and protein.
+"""
+
+import numpy as np
+from typing import List, Dict, Tuple
+from skimage import filters, measure, morphology, segmentation
+from scipy import ndimage
+
+
+def segment_cells(phase_image: np.ndarray, min_cell_area: int = 50) -> np.ndarray:
+    """
+    Segment individual cells from a phase contrast image.
+
+    Args:
+        phase_image: Phase contrast image (grayscale or RGB)
+        min_cell_area: Minimum cell area in pixels
+
+    Returns:
+        Labeled image where each cell has a unique integer label
+    """
+    # Convert to grayscale if RGB
+    if phase_image.ndim == 3:
+        gray = np.mean(phase_image, axis=2)
+    else:
+        gray = phase_image
+
+    # Apply Otsu's thresholding
+    threshold = filters.threshold_otsu(gray)
+    binary = gray < threshold  # Cells are typically darker in phase contrast
+
+    # Clean up binary image
+    binary = morphology.remove_small_objects(binary, min_size=min_cell_area)
+    binary = morphology.remove_small_holes(binary, area_threshold=min_cell_area)
+
+    # Label connected components
+    labeled = measure.label(binary)
+
+    # Clear border objects (cells touching image edge)
+    labeled = segmentation.clear_border(labeled)
+
+    return labeled
+
+
+def extract_cell_fluorescence(
+    intensity_image: np.ndarray,
+    labeled_cells: np.ndarray,
+    channels: List[str] = ['red', 'green'],
+) -> Dict[int, Dict[str, float]]:
+    """
+    Extract fluorescence values for each cell and channel.
+
+    Args:
+        intensity_image: RGB fluorescence image
+        labeled_cells: Labeled cell image from segmentation
+        channels: List of color channels to extract ('red', 'green', 'blue')
+
+    Returns:
+        Dictionary mapping cell_id -> {channel: mean_intensity}
+    """
+    channel_map = {'red': 0, 'green': 1, 'blue': 2}
+
+    # Get unique cell labels (excluding background = 0)
+    cell_ids = np.unique(labeled_cells)
+    cell_ids = cell_ids[cell_ids > 0]
+
+    results = {}
+
+    for cell_id in cell_ids:
+        cell_mask = labeled_cells == cell_id
+        cell_data = {}
+
+        for channel in channels:
+            if channel.lower() not in channel_map:
+                continue
+
+            channel_idx = channel_map[channel.lower()]
+            if intensity_image.ndim == 3:
+                channel_image = intensity_image[:, :, channel_idx]
+            else:
+                channel_image = intensity_image
+
+            # Extract mean fluorescence in this cell
+            cell_fluorescence = channel_image[cell_mask]
+            cell_data[channel] = float(np.mean(cell_fluorescence))
+
+        results[int(cell_id)] = cell_data
+
+    return results
+
+
+def extract_nuclear_cytoplasmic(
+    intensity_image: np.ndarray,
+    labeled_cells: np.ndarray,
+    nuclear_channel: str = 'green',
+    cytoplasmic_channel: str = 'red',
+) -> Dict[int, Dict[str, float]]:
+    """
+    Extract nuclear and cytoplasmic fluorescence for each cell.
+
+    This assumes:
+    - Nuclear repressor is in one fluorescence channel
+    - Cytosolic repressor is in another fluorescence channel
+
+    Args:
+        intensity_image: RGB fluorescence image
+        labeled_cells: Labeled cell image from segmentation
+        nuclear_channel: Color channel for nuclear fluorescence
+        cytoplasmic_channel: Color channel for cytoplasmic fluorescence
+
+    Returns:
+        Dictionary mapping cell_id -> {'nuclear': intensity, 'cytoplasmic': intensity}
+    """
+    channel_map = {'red': 0, 'green': 1, 'blue': 2}
+
+    cell_ids = np.unique(labeled_cells)
+    cell_ids = cell_ids[cell_ids > 0]
+
+    results = {}
+
+    for cell_id in cell_ids:
+        cell_mask = labeled_cells == cell_id
+
+        # Extract nuclear fluorescence
+        nuclear_idx = channel_map[nuclear_channel.lower()]
+        nuclear_image = intensity_image[:, :, nuclear_idx]
+        nuclear_intensity = float(np.mean(nuclear_image[cell_mask]))
+
+        # Extract cytoplasmic fluorescence
+        cyto_idx = channel_map[cytoplasmic_channel.lower()]
+        cyto_image = intensity_image[:, :, cyto_idx]
+        cyto_intensity = float(np.mean(cyto_image[cell_mask]))
+
+        results[int(cell_id)] = {
+            'nuclear': nuclear_intensity,
+            'cytoplasmic': cyto_intensity,
+        }
+
+    return results
+
+
+def track_cells_across_time(
+    labeled_images: List[np.ndarray],
+) -> Dict[int, List[Tuple[int, int]]]:
+    """
+    Track cell identities across time points based on spatial overlap.
+
+    This is a simple tracking algorithm based on maximum overlap between
+    consecutive frames.
+
+    Args:
+        labeled_images: List of labeled cell images (one per timepoint)
+
+    Returns:
+        Dictionary mapping track_id -> [(timepoint_idx, cell_label), ...]
+    """
+    if len(labeled_images) == 0:
+        return {}
+
+    # Initialize tracks with cells from first frame
+    tracks = {}
+    cell_ids = np.unique(labeled_images[0])
+    cell_ids = cell_ids[cell_ids > 0]
+
+    for track_id, cell_id in enumerate(cell_ids):
+        tracks[track_id] = [(0, int(cell_id))]
+
+    next_track_id = len(tracks)
+
+    # Process subsequent frames
+    for t in range(1, len(labeled_images)):
+        prev_labels = labeled_images[t - 1]
+        curr_labels = labeled_images[t]
+
+        curr_cell_ids = np.unique(curr_labels)
+        curr_cell_ids = curr_cell_ids[curr_cell_ids > 0]
+
+        assigned = set()
+
+        # For each current cell, find best match in previous frame
+        for curr_id in curr_cell_ids:
+            curr_mask = curr_labels == curr_id
+
+            # Find overlap with previous frame cells
+            overlaps = {}
+            for prev_id in np.unique(prev_labels[curr_mask]):
+                if prev_id == 0:
+                    continue
+                prev_mask = prev_labels == prev_id
+                overlap = np.sum(curr_mask & prev_mask)
+                overlaps[prev_id] = overlap
+
+            # Assign to track with maximum overlap
+            if overlaps:
+                best_prev_id = max(overlaps, key=overlaps.get)
+
+                # Find which track this previous cell belongs to
+                for track_id, track_list in tracks.items():
+                    if (t - 1, best_prev_id) in track_list:
+                        tracks[track_id].append((t, int(curr_id)))
+                        assigned.add(curr_id)
+                        break
+            else:
+                # New cell appeared
+                tracks[next_track_id] = [(t, int(curr_id))]
+                next_track_id += 1
+                assigned.add(curr_id)
+
+        # Handle unassigned cells (new cells)
+        for curr_id in curr_cell_ids:
+            if curr_id not in assigned:
+                tracks[next_track_id] = [(t, int(curr_id))]
+                next_track_id += 1
+
+    return tracks

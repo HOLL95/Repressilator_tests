@@ -1,0 +1,6 @@
+1. Each trascription repressor was induced to the maximum level
+2. The total flouresence was measured, after background subtracting the total flouresence from each cell in the absence of induction
+3. The cells were lysed and the protein purified, and quantified in nanograms
+4. The flouresence from an individual cell will be much lower - the conversion factor between pixel intensities and the arbitrary units in the calibration
+   effort was determined to be 1e7 using reference flourophores. 
+   
