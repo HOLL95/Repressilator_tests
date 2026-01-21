@@ -5,11 +5,27 @@ import numpy as np
 matplotlib.use('Qt5Agg')
 from PIL import Image 
 from scipy import ndimage
-from skimage.filters import sobel                                                                                                                                                                                
+from skimage.filters import sobel     
  
 from skimage import filters, measure, morphology, segmentation
+def calculate_intersection(new_bbox, new_mask, old_bbox, old_mask):
+    """
+    Calculate IoU between two masks.
+    new_mask and old_mask are now numpy arrays of shape (N, 2) containing [row, col] indices
+    in full image coordinates.
+    """
+    # Convert indices to sets of tuples for efficient intersection
+    new_pixels = set(map(tuple, new_mask))
+    old_pixels = set(map(tuple, old_mask))
 
+    intersection = len(new_pixels & old_pixels)
+    union = len(new_pixels | old_pixels)
 
+    if union > 0:
+        iou = intersection / union
+        return iou
+    else:
+        return 0
 def is_duplicate_mask(new_bbox, new_mask, saved_cells, threshold=0.95):
     """
     Check if a mask is already saved (>threshold overlap).
@@ -25,47 +41,12 @@ def is_duplicate_mask(new_bbox, new_mask, saved_cells, threshold=0.95):
     new_minr, new_minc, new_maxr, new_maxc = new_bbox
 
     for cell in saved_cells:
-        old_minr, old_minc, old_maxr, old_maxc = cell['bbox']
-
-        # Check if bounding boxes overlap at all
-        if (new_maxr < old_minr or new_minr > old_maxr or
-            new_maxc < old_minc or new_minc > old_maxc):
-            continue  # No overlap, skip
-
-        # Calculate overlap region
-        overlap_minr = max(new_minr, old_minr)
-        overlap_minc = max(new_minc, old_minc)
-        overlap_maxr = min(new_maxr, old_maxr)
-        overlap_maxc = min(new_maxc, old_maxc)
-
-        # Extract the overlapping portions from both masks
-        # Convert bbox coordinates to local mask coordinates
-        new_overlap_minr = overlap_minr - new_minr
-        new_overlap_minc = overlap_minc - new_minc
-        new_overlap_maxr = overlap_maxr - new_minr
-        new_overlap_maxc = overlap_maxc - new_minc
-
-        old_overlap_minr = overlap_minr - old_minr
-        old_overlap_minc = overlap_minc - old_minc
-        old_overlap_maxr = overlap_maxr - old_minr
-        old_overlap_maxc = overlap_maxc - old_minc
-
-        # Get overlapping regions from both masks
-        new_overlap_region = new_mask[new_overlap_minr:new_overlap_maxr,
-                                       new_overlap_minc:new_overlap_maxc]
-        old_overlap_region = cell['mask'][old_overlap_minr:old_overlap_maxr,
-                                           old_overlap_minc:old_overlap_maxc]
-
-        # Calculate IoU = intersection / union
-        intersection = np.sum(new_overlap_region & old_overlap_region)
-        union = np.sum(new_mask) + np.sum(cell['mask']) - intersection
-
-        if union > 0:
-            iou = intersection / union
-            if iou >= threshold:
-                return True
-
+        intersection_pc=calculate_intersection(new_bbox, new_mask,cell['bbox'], cell["mask"])
+        if intersection_pc>threshold:
+            return True
     return False
+
+
 
 
 intensity_dir="images/tests/intensity/jammed"
@@ -81,7 +62,8 @@ timepoints, intensity_images, phase_images = ra.image_loader.load_timeseries(
 idx=5
 #ax[0].imshow(phase_images[idx], cmap="gray")
 #plt.show()
-for m in range(0, len(phase_images),10):
+save_trace=[]
+for m in range(0, 20):
     total=0
     saved_cells = []  # Reset for each frame
     cell_id_counter = 0
@@ -95,32 +77,32 @@ for m in range(0, len(phase_images),10):
     cell=(labelled<2)
     
 
-    from skimage.measure import regionprops                                                                                                                                                                          
-                                                                                                                                                                                            
+    from skimage.measure import regionprops                  
+                 
     regions = regionprops(measure.label(cytoplasm))        
     cols=10
-    rows=7                                                                                                                                                                                                        
+    rows=7          
     #fig, axes1 = plt.subplots(rows, cols)      
-    fig2, axes2= plt.subplots(rows, cols)                                                                                                                                                      #axed=[axes1, axes2]
-    #axed=[axes1, axes2]                         
-    minsize=4                                                                                                                                                                                       
+    #fig2, axes2= plt.subplots(rows, cols) 
+    #axed=[axes1, axes2]      
+    minsize=4            
     for i, region in enumerate(regions):    
         
     # Get bounding box coordinates   
-        axes=axes2#axed[j]        
-        ax=axes[i//10, i%10]                                                                                                                                                    
-        minr, minc, maxr, maxc = region.bbox                                                                                                                                                                         
-                                                                                                                                                                                
+        #axes=axes2#axed[j]        
+        #ax=axes[i//10, i%10]               
+        minr, minc, maxr, maxc = region.bbox                 
+     
         # Crop to bounding box
         phase_crop = phase_images[m][minr-0:maxr+0, minc-0:maxc+0]
         cell_crop=nuclei[minr-0:maxr+0, minc-0:maxc+0]
         #threshed = filters.threshold_multiotsu(phase_crop, classes=3)
         #labelled_cell = np.digitize(phase_crop, bins=threshed) 
         
-        #nuclei_mask = (labelled_cell == 0)  # or == 2, depending on what you want                                                                                                                                        
-                                                                                                                                                                                
+        #nuclei_mask = (labelled_cell == 0)  # or == 2, depending on what you want   
+     
         connected_labels = measure.label(cell_crop)        
-                                                                                                                                                                                                                                                                            
+  
         n_regions = connected_labels.max()  
         actual=0
         
@@ -136,48 +118,177 @@ for m in range(0, len(phase_images),10):
             cell_mask=  labelled[minr-0:maxr+0, minc-0:maxc+0]<2
             distance = ndimage.distance_transform_edt(cell_mask)
             watershed_labels = segmentation.watershed(-distance, connected_labels, mask=cell_mask)
-            ax.imshow(watershed_labels, cmap="Spectral")
+            #ax.imshow(phase_crop, cmap="Spectral")
 
             # Process each watershed-segmented cell
             for watershed_id in range(1, watershed_labels.max() + 1):
                 # Extract mask for this specific cell
                 cell_specific_mask = (watershed_labels == watershed_id)
 
-                # Skip if too small
-                if np.sum(cell_specific_mask) < minsize:
-                    continue
 
                 # Check for duplicate
                 if not is_duplicate_mask((minr, minc, maxr, maxc), cell_specific_mask, saved_cells):
-                    saved_cells.append({
-                        'bbox': (minr, minc, maxr, maxc),
-                        'mask': cell_specific_mask.copy(),
-                        'cell_id': cell_id_counter
-                    })
-                    cell_id_counter += 1
+                                        # Extract nuclei mask for this cell
+                                        nuclei_crop = nuclei[minr-0:maxr+0, minc-0:maxc+0]
+                                        nuclei_specific_mask = nuclei_crop & cell_specific_mask
 
-        else:
-            ax.imshow(phase_crop, cmap='gray')
+                                        # Convert masks to full image coordinates
+                                        cell_indices = np.argwhere(cell_specific_mask)
+                                        cell_indices[:, 0] += minr
+                                        cell_indices[:, 1] += minc
 
-            # For single cell case
-            if actual == 1:
-                # Check for duplicate
-                if not is_duplicate_mask((minr, minc, maxr, maxc), cell_crop, saved_cells):
-                    saved_cells.append({
-                        'bbox': (minr, minc, maxr, maxc),
-                        'mask': cell_crop.copy(),
-                        'cell_id': cell_id_counter
-                    })
-                    cell_id_counter += 1
+                                        nuclei_indices = np.argwhere(nuclei_specific_mask)
+                                        nuclei_indices[:, 0] += minr
+                                        nuclei_indices[:, 1] += minc
 
-        ax.set_title(actual)
-        total+=actual                                                                                                                         
-        ax.axis('off')     
-                                                                                                                                                                    
-                                                                                                                                                                                                                                                                                                                                                                                    
-                                                                                                                                                                                
-    print(f"Frame {m}: Total count = {total}, Unique cells saved = {len(saved_cells)}, Duplicates removed = {total - len(saved_cells)}")
-    plt.tight_layout()
-    plt.show()
+                                        saved_cells.append({
+                                            'bbox': (minr, minc, maxr, maxc),
+                                            'mask': cell_indices,
+                                            'nmask': nuclei_indices,
+                                            'cell_id': cell_id_counter
+                                        })
+                                        cell_id_counter += 1
+
+        # For single cell case
+        if actual == 1:
+            # Check for duplicate
+            if not is_duplicate_mask((minr, minc, maxr, maxc), cell_crop, saved_cells):
+                # Extract nuclei mask for this cell
+                nuclei_crop = nuclei[minr-0:maxr+0, minc-0:maxc+0]
+                nuclei_specific_mask = nuclei_crop & cell_crop
+
+                # Convert masks to full image coordinates
+                cell_indices = np.argwhere(cell_crop)
+                cell_indices[:, 0] += minr
+                cell_indices[:, 1] += minc
+
+                nuclei_indices = np.argwhere(nuclei_specific_mask)
+                nuclei_indices[:, 0] += minr
+                nuclei_indices[:, 1] += minc
+
+                saved_cells.append({
+                    'bbox': (minr, minc, maxr, maxc),
+                    'mask': cell_indices,
+                    'nmask': nuclei_indices,
+                    'cell_id': cell_id_counter
+                })
+                cell_id_counter += 1
+
+    if m==0:
+        save_trace.append(saved_cells)
+    else:
+        # Store both euclidean distance and area difference
+        # Shape: (old_cells, new_cells, 2) where last dimension is [distance, area_diff]
+        all_assignments=np.zeros((len(save_trace[m-1]), len(saved_cells), 2))
+        for q in range(0, len(save_trace[m-1])):
+            # Calculate centroid and area for old cell
+            # Use nuclei mask for centroid, cell mask for area
+            old_nmask = save_trace[m-1][q]["nmask"]
+            old_mask = save_trace[m-1][q]["mask"]
+            old_centroid = old_nmask.mean(axis=0) if len(old_nmask) > 0 else old_mask.mean(axis=0)
+            old_area = len(old_mask)
+            save_trace[m-1][q]["centre"]=old_centroid
+
+            for j in range(0, len(saved_cells)):
+                # Calculate centroid and area for new cell
+                # Use nuclei mask for centroid, cell mask for area
+                new_nmask = saved_cells[j]["nmask"]
+                new_mask = saved_cells[j]["mask"]
+                new_centroid = new_nmask.mean(axis=0) if len(new_nmask) > 0 else new_mask.mean(axis=0)
+                new_area = len(new_mask)
+                saved_cells[j]["centre"]=new_centroid
+
+                # Calculate euclidean distance between centroids
+                euclidean_dist = np.linalg.norm(old_centroid - new_centroid)
+
+                # Calculate difference in cell area
+                area_diff = np.abs(old_area - new_area)
+
+                all_assignments[q,j,0] = euclidean_dist
+                all_assignments[q,j,1] = area_diff         
+
+        # Simple assignment: each old cell to its nearest new cell
+        n_old = len(save_trace[m-1])
+        n_new = len(saved_cells)
+        print(n_old, n_new)
+        assignments = {}  # old_idx -> new_idx
+        for old_idx in range(n_old):
+            argmin = np.argmin(all_assignments[old_idx, :, 0])
+            saved_cells[argmin]["cell_id"]=save_trace[m-1][old_idx]["cell_id"]
+
+        # Visualization for debugging
+        
+        removal_idx=[]
+        
+        for r in range(0, n_old):
+            #r is the row index of all_assignments
+            dupes=[x for x in range(0, n_new) if saved_cells[x]["cell_id"]==r]
+            
+            if len(dupes)>1:
+               
+                old_centre=[cell["centre"] for cell in save_trace[m-1] if cell["cell_id"]==r]
+
+                minima=[
+                    np.linalg.norm(saved_cells[y]["centre"]-old_centre) for y in dupes
+                ]
+                #for z in range(0, len(dupes)):
+                #    other_distances=[np.linalg.norm(saved_cells[dupes[z]]["centre"]-saved_cells[x]["centre"]) for x in range(0, len(saved_cells)) if x!=dupes[z]]
+                #    print(min(other_distances))
+                minima=np.argmin(minima)
+               
+                del dupes[minima]
+                
+                removal_idx+=dupes
+        saved_cells=[saved_cells[x] for x in range(0, len(saved_cells)) if x not in removal_idx]#
+       
+       
+        
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 7))
+        # Show t-1 frame with cell numbers
+        ax1.imshow(phase_images[m-1], cmap='gray')
+        ax1.set_title(f'Frame {m-1} (t-1)')
+        for old_idx, cell_data in enumerate(save_trace[m-1]):
+            centroid = cell_data['centre']
+            ax1.text(centroid[1], centroid[0], cell_data["cell_id"],
+                    color='red', fontsize=12, fontweight='bold',
+                    ha='center', va='center',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+
+        # Show t frame with cell numbers and assignments
+        ax2.imshow(phase_images[m], cmap='gray')
+        ax2.set_title(f'Frame {m} (t)')
+        for new_idx, cell_data in enumerate(saved_cells):
+            centroid = cell_data['centre']
+
+            # Find which old cell maps to this new cell
+            
+            label= cell_data["cell_id"]
+
+            ax2.text(centroid[1], centroid[0], label,
+                    color='blue', fontsize=10, fontweight='bold',
+                    ha='center', va='center',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7))
+
+        ax1.axis('off')
+        ax2.axis('off')
+        plt.tight_layout()
+        plt.show()
+        plt.pause(0.5)  # Pause to see each frame
+
+        save_trace.append(saved_cells)
+        for m in range(0, len(save_trace[-1])):
+            save_trace[-1][m]["identified_flag"]=True
+        full_set=set(range(0,80))
+        all_cell_ids=set([c["cell_id"] for c in saved_cells])  
+        missing=list(full_set-all_cell_ids ) 
+        for m in range(0, len(missing)):
+            found=[cell for cell in save_trace[-2] if cell["cell_id"]==missing[m]]
+            found[0]["identified_flag"]=False
+            save_trace[-1].append(found[0])
+               
+
+                
+    #plt.tight_layout()
+    #plt.show()
 #ax[1].imshow(labelled,cmap='nipy_spectral')
 #plt.show()
