@@ -43,6 +43,7 @@ def is_duplicate_mask(new_bbox, new_mask, saved_cells, threshold=0.95):
     for cell in saved_cells:
         intersection_pc=calculate_intersection(new_bbox, new_mask,cell['bbox'], cell["mask"])
         if intersection_pc>threshold:
+            print("Fired")
             return True
     return False
 
@@ -286,7 +287,11 @@ for m in range(0, 20):
             found[0]["identified_flag"]=False
             save_trace[-1].append(found[0])
                
-
+#tasks
+#Get trace
+#Get fluourescence channel
+#write tests
+#
                 
     #plt.tight_layout()
     #plt.show()

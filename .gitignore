@@ -24,9 +24,8 @@ share/python-wheels/
 
 # Virtual environments
 venv/
-env/
-ENV/
-.venv
+cenv/
+
 
 # Results and outputs
 results/
@@ -54,6 +53,13 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+#misc
+image_tests.py
+segment_tests.py
+segment_demo.py
+test.py
+
 
 # Data (keep structure but ignore large files if needed)
 # Uncomment if you want to ignore images

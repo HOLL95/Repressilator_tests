@@ -11,10 +11,12 @@ from . import image_loader
 from . import fluorescence_extraction
 from . import calibration
 from . import ode_inference
+from . import utils
 
 __all__ = [
     "image_loader",
     "fluorescence_extraction",
     "calibration",
     "ode_inference",
+    "utils"
 ]

@@ -10,18 +10,19 @@ from typing import List, Dict, Tuple
 from skimage import filters, measure, morphology, segmentation
 from scipy import ndimage
 
-#Test ideas
-#Increasingly challenging cell
-def segment_cells(phase_image: np.ndarray, min_cell_area: int = 50) -> np.ndarray:
+
+
+
+def segment_cells(phase_image: np.ndarray, max_nuc_area: int = 5) -> np.ndarray:
     """
     Segment individual cells from a phase contrast image.
 
     Args:
         phase_image: Phase contrast image (grayscale or RGB)
-        min_cell_area: Minimum cell area in pixels
+        max_nuc_area: Minimum cell area in pixels
 
     Returns:
-        Labeled image where each cell has a unique integer label
+        list of cell dictionaries with bbox (bounding box) nuclear and cytosolic masks (nmask, mask) and ID, 
     """
     # Convert to grayscale if RGB
     if phase_image.ndim == 3:
@@ -30,74 +31,86 @@ def segment_cells(phase_image: np.ndarray, min_cell_area: int = 50) -> np.ndarra
         gray = phase_image
 
     # Apply Otsu's thresholding
-    threshold = filters.threshold_otsu(gray)
-    binary = gray < threshold  # Cells are typically darker in phase contrast
+    threshed=filters.threshold_multiotsu(phase_image, classes=3)
+    labelled = np.digitize(phase_image, bins=threshed) 
+    #darkest is nuclei, middle is cytoplasm
+    nuclei=(labelled == 0)
+    cytoplasm=(labelled == 1)
+    cell=(labelled<2)
 
-    # Clean up binary image
-    binary = morphology.remove_small_objects(binary, max_size=min_cell_area)
-    binary = morphology.remove_small_holes(binary, max_size=min_cell_area)
+    regions = measure.regionprops(measure.label(cytoplasm)) 
+    #store for each segment
+    saved_cells=[]
+    cell_id_counter = 0
+    #iterate through each contiguous cell element
+    for i, region in enumerate(regions):    
+        minr, minc, maxr, maxc = region.bbox 
+        #just the cell
+        phase_crop = phase_image[minr-0:maxr+0, minc-0:maxc+0]
+        cell_crop=cell[minr-0:maxr+0, minc-0:maxc+0]
+        nuc_crop=nuclei[minr-0:maxr+0, minc-0:maxc+0]
+        connected_labels = measure.label(nuc_crop)   
+        #count the number of nuclei     
+        n_regions = connected_labels.max()  
+        actual=0
+        #check it's not a spurious pixel
+        for z in range(0, n_regions):
+            cluster=np.sum(connected_labels==(z+1))
+            if cluster>max_nuc_area:
+                actual+=1
+        #more than one nucleus per region -> a bunch of collided cells
+        if actual>1:
+                threshed=filters.threshold_otsu(phase_crop)
+                cell_mask=  labelled[minr-0:maxr+0, minc-0:maxc+0]<2
+                distance = ndimage.distance_transform_edt(cell_mask)
+                #seperate the cells using distances from the nuclei
+                watershed_labels = segmentation.watershed(-distance, connected_labels, mask=cell_mask)
+                for watershed_id in range(1, watershed_labels.max() + 1):
+                    cell_specific_mask = (watershed_labels == watershed_id)
+                    nuclei_crop = nuclei[minr-0:maxr+0, minc-0:maxc+0]
+                    nuclei_specific_mask = nuclei_crop & cell_specific_mask
 
-    # Label connected components
-    labeled = measure.label(binary)
+                    # Convert masks to full image coordinates
+                    cell_indices = np.argwhere(cell_specific_mask)
+                    #store as index to main image
+                    cell_indices[:, 0] += minr
+                    cell_indices[:, 1] += minc
+                    nuclei_indices = np.argwhere(nuclei_specific_mask)
+                    nuclei_indices[:, 0] += minr
+                    nuclei_indices[:, 1] += minc
+                    saved_cells.append({
+                        'bbox': (minr, minc, maxr, maxc),
+                        'mask': cell_indices,
+                        'nmask': nuclei_indices,
+                        'cell_id': cell_id_counter
+                    })
+                    cell_id_counter += 1
+        else:
+            nuclei_crop = nuclei[minr-0:maxr+0, minc-0:maxc+0]
+            nuclei_specific_mask = nuclei_crop & nuc_crop
+            # store as index to main image
+            cell_indices = np.argwhere(cell_crop)
+            cell_indices[:, 0] += minr
+            cell_indices[:, 1] += minc
+            nuclei_indices = np.argwhere(nuclei_specific_mask)
+            nuclei_indices[:, 0] += minr
+            nuclei_indices[:, 1] += minc
+            saved_cells.append({
+                'bbox': (minr, minc, maxr, maxc),
+                'mask': cell_indices,
+                'nmask': nuclei_indices,
+                'cell_id': cell_id_counter
+            })
+            cell_id_counter += 1
+    return saved_cells
 
-    # Clear border objects (cells touching image edge)
-    labeled = segmentation.clear_border(labeled)
-
-    return labeled
-
-
-def extract_cell_fluorescence(
-    intensity_image: np.ndarray,
-    labeled_cells: np.ndarray,
-    channels: List[str] = ['red', 'green'],
-) -> Dict[int, Dict[str, float]]:
-    """
-    Extract fluorescence values for each cell and channel.
-
-    Args:
-        intensity_image: RGB fluorescence image
-        labeled_cells: Labeled cell image from segmentation
-        channels: List of color channels to extract ('red', 'green', 'blue')
-
-    Returns:
-        Dictionary mapping cell_id -> {channel: mean_intensity}
-    """
-    channel_map = {'red': 0, 'green': 1, 'blue': 2}
-
-    # Get unique cell labels (excluding background = 0)
-    cell_ids = np.unique(labeled_cells)
-    cell_ids = cell_ids[cell_ids > 0]
-
-    results = {}
-
-    for cell_id in cell_ids:
-        cell_mask = labeled_cells == cell_id
-        cell_data = {}
-
-        for channel in channels:
-            if channel.lower() not in channel_map:
-                continue
-
-            channel_idx = channel_map[channel.lower()]
-            if intensity_image.ndim == 3:
-                channel_image = intensity_image[:, :, channel_idx]
-            else:
-                channel_image = intensity_image
-
-            # Extract mean fluorescence in this cell
-            cell_fluorescence = channel_image[cell_mask]
-            cell_data[channel] = float(np.mean(cell_fluorescence))
-
-        results[int(cell_id)] = cell_data
-
-    return results
 
 
 def extract_nuclear_cytoplasmic(
     intensity_image: np.ndarray,
     labeled_cells: np.ndarray,
-    nuclear_channel: str = 'green',
-    cytoplasmic_channel: str = 'red',
+    nuclear_channel: str = 'red',
+    cytoplasmic_channel: str = 'green',
 ) -> Dict[int, Dict[str, float]]:
     """
     Extract nuclear and cytoplasmic fluorescence for each cell.
@@ -108,39 +121,30 @@ def extract_nuclear_cytoplasmic(
 
     Args:
         intensity_image: RGB fluorescence image
-        labeled_cells: Labeled cell image from segmentation
+        labeled_cells: List of cells with cytosolic and nuclear masks
         nuclear_channel: Color channel for nuclear fluorescence
         cytoplasmic_channel: Color channel for cytoplasmic fluorescence
 
     Returns:
-        Dictionary mapping cell_id -> {'nuclear': intensity, 'cytoplasmic': intensity}
+        Updated labeled_cells lists to include the nuclear and cytosolic intensities
     """
     channel_map = {'red': 0, 'green': 1, 'blue': 2}
 
-    cell_ids = np.unique(labeled_cells)
-    cell_ids = cell_ids[cell_ids > 0]
-
-    results = {}
-
-    for cell_id in cell_ids:
-        cell_mask = labeled_cells == cell_id
-
-        # Extract nuclear fluorescence
-        nuclear_idx = channel_map[nuclear_channel.lower()]
-        nuclear_image = intensity_image[:, :, nuclear_idx]
-        nuclear_intensity = float(np.mean(nuclear_image[cell_mask]))
-
-        # Extract cytoplasmic fluorescence
-        cyto_idx = channel_map[cytoplasmic_channel.lower()]
-        cyto_image = intensity_image[:, :, cyto_idx]
+    
+    nuclear_idx = channel_map[nuclear_channel.lower()]
+    nuclear_image = intensity_image[:, :, nuclear_idx]
+    cyto_idx = channel_map[cytoplasmic_channel.lower()]
+    cyto_image = intensity_image[:, :, cyto_idx]
+    for i in range(0,len(labeled_cells)):
+        cell_mask = labeled_cells[i]["mask"]
+        nuclear_mask=labeled_cells[i]["nmask"]
+        nuclear_intensity = float(np.mean(nuclear_image[nuclear_mask]))       
         cyto_intensity = float(np.mean(cyto_image[cell_mask]))
 
-        results[int(cell_id)] = {
-            'nuclear': nuclear_intensity,
-            'cytoplasmic': cyto_intensity,
-        }
+        labeled_cells[i]["n_intensity"]=nuclear_intensity
+        labeled_cells[i]["c_intensity"]=cyto_intensity
 
-    return results
+    return labeled_cells
 
 
 def track_cells_across_time(
