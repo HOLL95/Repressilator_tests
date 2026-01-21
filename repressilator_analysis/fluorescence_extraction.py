@@ -119,7 +119,7 @@ def extract_nuclear_cytoplasmic(
     cell_ids = np.unique(labeled_cells)
     cell_ids = cell_ids[cell_ids > 0]
 
-    results = {}
+    results = []
 
     for cell_id in cell_ids:
         cell_mask = labeled_cells == cell_id
@@ -134,10 +134,10 @@ def extract_nuclear_cytoplasmic(
         cyto_image = intensity_image[:, :, cyto_idx]
         cyto_intensity = float(np.mean(cyto_image[cell_mask]))
 
-        results[int(cell_id)] = {
+        results.append ( {
             'nuclear': nuclear_intensity,
             'cytoplasmic': cyto_intensity,
-        }
+        })
 
     return results
 
