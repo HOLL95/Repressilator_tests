@@ -33,7 +33,6 @@ ENV/
 results/
 *.pkl
 *.csv
-*.png
 *.pdf
 
 # Jupyter Notebook
