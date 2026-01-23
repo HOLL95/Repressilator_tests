@@ -145,7 +145,7 @@ def extract_nuclear_cytoplasmic(
 def track_cells_across_time(
     phase_images: List[np.ndarray],
     min_cell_area: int = 50,
-) -> Tuple[Dict[int, List[Tuple[int, int]]], List[np.ndarray]]:
+) -> Tuple[Dict[int, List[Tuple[int, int, Tuple[float, float]]]], List[np.ndarray]]:
     """
     Segment and track cell identities across time points based on spatial overlap.
 
@@ -158,7 +158,8 @@ def track_cells_across_time(
 
     Returns:
         Tuple of:
-        - Dictionary mapping track_id -> [(timepoint_idx, cell_label), ...]
+        - Dictionary mapping track_id -> [(timepoint_idx, cell_label, (y, x)), ...]
+          where (y, x) is the centroid pixel location of the cell
         - List of labeled cell images (one per timepoint)
     """
     if len(phase_images) == 0:
@@ -176,8 +177,13 @@ def track_cells_across_time(
     cell_ids = np.unique(labeled)
     cell_ids = cell_ids[cell_ids > 0]
 
+    # Get centroids for first frame
+    props = measure.regionprops(labeled)
+    centroids = {prop.label: prop.centroid for prop in props}
+
     for track_id, cell_id in enumerate(cell_ids):
-        tracks[track_id] = [(0, int(cell_id))]
+        centroid = centroids[cell_id]
+        tracks[track_id] = [(0, int(cell_id), (float(centroid[0]), float(centroid[1])))]
 
     next_track_id = len(tracks)
 
@@ -191,6 +197,10 @@ def track_cells_across_time(
 
         curr_cell_ids = np.unique(curr_labels)
         curr_cell_ids = curr_cell_ids[curr_cell_ids > 0]
+
+        # Get centroids for current frame
+        props = measure.regionprops(curr_labels)
+        centroids = {prop.label: prop.centroid for prop in props}
 
         assigned = set()
 
@@ -213,20 +223,23 @@ def track_cells_across_time(
 
                 # Find which track this previous cell belongs to
                 for track_id, track_list in tracks.items():
-                    if (t - 1, best_prev_id) in track_list:
-                        tracks[track_id].append((t, int(curr_id)))
+                    if any(entry[0] == t - 1 and entry[1] == best_prev_id for entry in track_list):
+                        centroid = centroids[curr_id]
+                        tracks[track_id].append((t, int(curr_id), (float(centroid[0]), float(centroid[1]))))
                         assigned.add(curr_id)
                         break
             else:
                 # New cell appeared
-                tracks[next_track_id] = [(t, int(curr_id))]
+                centroid = centroids[curr_id]
+                tracks[next_track_id] = [(t, int(curr_id), (float(centroid[0]), float(centroid[1])))]
                 next_track_id += 1
                 assigned.add(curr_id)
 
         # Handle unassigned cells (new cells)
         for curr_id in curr_cell_ids:
             if curr_id not in assigned:
-                tracks[next_track_id] = [(t, int(curr_id))]
+                centroid = centroids[curr_id]
+                tracks[next_track_id] = [(t, int(curr_id), (float(centroid[0]), float(centroid[1])))]
                 next_track_id += 1
 
     return tracks, labeled_images
