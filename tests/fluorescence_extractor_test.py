@@ -96,6 +96,15 @@ class TestFluorescenceIntegration:
                 raise ValueError(f"Fluorescence value extraction in {keys[j]} over distance threshold to true value (mean difference {np.mean(best_distances)}, s.d. {np.std(best_distances)})")
     def test_track_cells(self, test_images):
         tracks=ra.fluorescence_extraction.track_cells_across_time(test_images["phase_images"], 5)
+        if len(tracks)==2:
+            labelled_images=tracks[1]
+            new_tracks=[[] for x in range(0, len(test_images["phase_images"]))]
+            for i in range(0, len(test_images["phase_images"])):
+                for key in tracks[0].keys():
+                    for elem in tracks[0][key]:
+                        if elem[0]==i:
+                            new_tracks[i].append({"cell_id":int(key), "centre":list(elem[2])})
+            tracks=new_tracks
         actual_data=test_images["data"]
         for i in range(0, len(tracks)):
             positions=actual_data[i*80:(i+1)*80,8:]
