@@ -11,9 +11,9 @@ from skimage import filters, measure, morphology, segmentation, feature
 from scipy import ndimage
 import repressilator_analysis as ra
 import matplotlib.pyplot as plt
+from scipy.optimize import linear_sum_assignment
 
-
-def segment_cells(phase_image: np.ndarray, max_nuc_area: int = 5) -> np.ndarray:
+def segment_cells(phase_image: np.ndarray, max_nuc_area: int = 5, show_arg=False) -> np.ndarray:
     """
     Segment individual cells from a phase contrast image.
 
@@ -39,7 +39,7 @@ def segment_cells(phase_image: np.ndarray, max_nuc_area: int = 5) -> np.ndarray:
     cell=(labelled<2)
     regions = measure.regionprops(measure.label(cytoplasm)) 
     #store for each segment
-    saved_cells=[]
+    labelled_cells=[]
 
     cell_id_counter = 0
     counter=1
@@ -63,7 +63,7 @@ def segment_cells(phase_image: np.ndarray, max_nuc_area: int = 5) -> np.ndarray:
                 actual+=1
                 nucleus_region = (connected_labels == (z+1))
                 props = measure.regionprops(measure.label(nucleus_region))[0] 
-                if props.eccentricity>0.8:
+                if props.eccentricity>0.74:
                     actual+=1
                     needs_splitting+=[z+1]
         #if there's two merged nuclei they need to be split
@@ -103,9 +103,9 @@ def segment_cells(phase_image: np.ndarray, max_nuc_area: int = 5) -> np.ndarray:
                     nuclei_indices[:, 0] += minr
                     nuclei_indices[:, 1] += minc
                     position= nuclei_indices.mean(axis=0)
-                    if ra.utils.check_position_dupes(position, [s["centre"] for s in saved_cells]) is False:
+                    if ra.utils.check_position_dupes(position, [s["centre"] for s in labelled_cells]) is False:
                         if len(cell_indices)!=0 and len(nuclei_indices)!=0:
-                            saved_cells.append({
+                            labelled_cells.append({
                                 'bbox': (minr, minc, maxr, maxc),
                                 'mask': cell_indices,
                                 'nmask': nuclei_indices,
@@ -125,9 +125,9 @@ def segment_cells(phase_image: np.ndarray, max_nuc_area: int = 5) -> np.ndarray:
             nuclei_indices[:, 0] += minr
             nuclei_indices[:, 1] += minc
             position= nuclei_indices.mean(axis=0)
-            if ra.utils.check_position_dupes(position, [s["centre"] for s in saved_cells]) is False:
+            if ra.utils.check_position_dupes(position, [s["centre"] for s in labelled_cells]) is False:
                 if len(cell_indices)!=0 and len(nuclei_indices)!=0:
-                    saved_cells.append({
+                    labelled_cells.append({
                         'bbox': (minr, minc, maxr, maxc),
                         'mask': cell_indices,
                         'nmask': nuclei_indices,
@@ -135,18 +135,18 @@ def segment_cells(phase_image: np.ndarray, max_nuc_area: int = 5) -> np.ndarray:
                         "centre" :position
                     })
                     cell_id_counter += 1
-
-    """plt.imshow(phase_image, cmap='gray')
-    all_ids=[c["cell_id"] for c in saved_cells]
-    for old_idx, cell_data in enumerate(saved_cells):
-        centroid = cell_data['centre']
-        
-        plt.text(centroid[1], centroid[0], cell_data["cell_id"],
-                color='red', fontsize=12, fontweight='bold',
-                ha='center', va='center',
-                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
-    plt.show()"""
-    return saved_cells
+    if show_arg==True:
+        plt.imshow(phase_image, cmap='gray')
+        all_ids=[c["cell_id"] for c in labelled_cells]
+        for old_idx, cell_data in enumerate(labelled_cells):
+            centroid = cell_data['centre']
+            
+            plt.text(centroid[1], centroid[0], cell_data["cell_id"],
+                    color='red', fontsize=12, fontweight='bold',
+                    ha='center', va='center',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+        plt.show()
+    return labelled_cells
 
 
 
@@ -190,8 +190,9 @@ def extract_nuclear_cytoplasmic(
 
 
 def track_cells_across_time(
-    labeled_images: List[np.ndarray],
-) -> Dict[int, List[Tuple[int, int]]]:
+    phase_images: List[np.ndarray],
+    min_nuc_area: int = 5,
+):
     """
     Track cell identities across time points based on spatial overlap.
 
@@ -199,67 +200,53 @@ def track_cells_across_time(
     consecutive frames.
 
     Args:
-        labeled_images: List of labeled cell images (one per timepoint)
+        labeled_images: List of phase contrast images
 
     Returns:
-        Dictionary mapping track_id -> [(timepoint_idx, cell_label), ...]
+        Dictionary containing list of cells at each timepoint, where each cell is tagged with a persistent cellID
     """
-    if len(labeled_images) == 0:
-        return {}
+    saved_tracks=[]
+    labelled_cells=ra.fluorescence_extraction.segment_cells(phase_images[0], min_nuc_area)
+    saved_tracks.append(labelled_cells)
+    for i in range(1, len(phase_images)):
+        labelled_cells=ra.fluorescence_extraction.segment_cells(phase_images[i], min_nuc_area)
+        cost_matrix=np.zeros((len(saved_tracks[i-1]), len(labelled_cells)))
+        for q in range(0, len(saved_tracks[i-1])):
+            old_centre=saved_tracks[i-1][q]["centre"]
+            for j in range(0, len(labelled_cells)):
+                new_centre=labelled_cells[j]["centre"]
+                cost_matrix[q,j]=np.linalg.norm(new_centre-old_centre)
+        row_ind, col_ind = linear_sum_assignment(cost_matrix)
+        # Assign IDs based on optimal matching
+        for old_idx, new_idx in zip(row_ind, col_ind):
+            labelled_cells[new_idx]["cell_id"] = saved_tracks[i-1][old_idx]["cell_id"]
+        # Remove spurious cells with duplicate IDs (keep closest to old position)
+        id_to_cells = {}
+        for idx, cell in enumerate(labelled_cells):
+            cid = cell["cell_id"]
+            if cid not in id_to_cells:
+                id_to_cells[cid] = []
+            id_to_cells[cid].append(idx)
+        removal_indices = []
+        for cid, indices in id_to_cells.items():
+            if len(indices) > 1:
+                # Find the old cell's position for this ID
+                old_cells = [c for c in saved_tracks[i-1] if c["cell_id"] == cid]
+                if old_cells:
+                    old_centre = old_cells[0]["centre"]
+                    # Calculate distance from each duplicate to old position
+                    distances = [
+                        np.linalg.norm(labelled_cells[idx]["centre"] - old_centre)
+                        for idx in indices
+                    ]
+                    # Keep the closest, mark others for removal
+                    closest_idx = indices[np.argmin(distances)]
+                    removal_indices.extend([idx for idx in indices if idx != closest_idx])
 
-    # Initialize tracks with cells from first frame
-    tracks = {}
-    cell_ids = np.unique(labeled_images[0])
-    cell_ids = cell_ids[cell_ids > 0]
-
-    for track_id, cell_id in enumerate(cell_ids):
-        tracks[track_id] = [(0, int(cell_id))]
-
-    next_track_id = len(tracks)
-
-    # Process subsequent frames
-    for t in range(1, len(labeled_images)):
-        prev_labels = labeled_images[t - 1]
-        curr_labels = labeled_images[t]
-
-        curr_cell_ids = np.unique(curr_labels)
-        curr_cell_ids = curr_cell_ids[curr_cell_ids > 0]
-
-        assigned = set()
-
-        # For each current cell, find best match in previous frame
-        for curr_id in curr_cell_ids:
-            curr_mask = curr_labels == curr_id
-
-            # Find overlap with previous frame cells
-            overlaps = {}
-            for prev_id in np.unique(prev_labels[curr_mask]):
-                if prev_id == 0:
-                    continue
-                prev_mask = prev_labels == prev_id
-                overlap = np.sum(curr_mask & prev_mask)
-                overlaps[prev_id] = overlap
-
-            # Assign to track with maximum overlap
-            if overlaps:
-                best_prev_id = max(overlaps, key=overlaps.get)
-
-                # Find which track this previous cell belongs to
-                for track_id, track_list in tracks.items():
-                    if (t - 1, best_prev_id) in track_list:
-                        tracks[track_id].append((t, int(curr_id)))
-                        assigned.add(curr_id)
-                        break
-            else:
-                # New cell appeared
-                tracks[next_track_id] = [(t, int(curr_id))]
-                next_track_id += 1
-                assigned.add(curr_id)
-
-        # Handle unassigned cells (new cells)
-        for curr_id in curr_cell_ids:
-            if curr_id not in assigned:
-                tracks[next_track_id] = [(t, int(curr_id))]
-                next_track_id += 1
-
-    return tracks
+        # Remove spurious cells (in reverse order to preserve indices)
+        
+        for idx in sorted(removal_indices, reverse=True):
+            del labelled_cells[idx]
+        saved_tracks.append(labelled_cells)
+    return saved_tracks
+        
