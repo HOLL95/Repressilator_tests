@@ -134,7 +134,7 @@ def extract_nuclear_cytoplasmic(
         cyto_image = intensity_image[:, :, cyto_idx]
         cyto_intensity = float(np.mean(cyto_image[cell_mask]))
 
-        results.append ( {
+        results.append({
             'nuclear': nuclear_intensity,
             'cytoplasmic': cyto_intensity,
         })
@@ -143,26 +143,37 @@ def extract_nuclear_cytoplasmic(
 
 
 def track_cells_across_time(
-    labeled_images: List[np.ndarray],
-) -> Dict[int, List[Tuple[int, int]]]:
+    phase_images: List[np.ndarray],
+    min_cell_area: int = 50,
+) -> Tuple[Dict[int, List[Tuple[int, int]]], List[np.ndarray]]:
     """
-    Track cell identities across time points based on spatial overlap.
+    Segment and track cell identities across time points based on spatial overlap.
 
-    This is a simple tracking algorithm based on maximum overlap between
-    consecutive frames.
+    This function segments cells from phase contrast images and tracks them
+    across frames using maximum overlap between consecutive frames.
 
     Args:
-        labeled_images: List of labeled cell images (one per timepoint)
+        phase_images: List of phase contrast images (one per timepoint)
+        min_cell_area: Minimum cell area in pixels for segmentation
 
     Returns:
-        Dictionary mapping track_id -> [(timepoint_idx, cell_label), ...]
+        Tuple of:
+        - Dictionary mapping track_id -> [(timepoint_idx, cell_label), ...]
+        - List of labeled cell images (one per timepoint)
     """
-    if len(labeled_images) == 0:
-        return {}
+    if len(phase_images) == 0:
+        return {}, []
+
+    labeled_images = []
+    tracks = {}
+    next_track_id = 0
+
+    # Process first frame
+    labeled = segment_cells(phase_images[0], min_cell_area)
+    labeled_images.append(labeled)
 
     # Initialize tracks with cells from first frame
-    tracks = {}
-    cell_ids = np.unique(labeled_images[0])
+    cell_ids = np.unique(labeled)
     cell_ids = cell_ids[cell_ids > 0]
 
     for track_id, cell_id in enumerate(cell_ids):
@@ -171,9 +182,12 @@ def track_cells_across_time(
     next_track_id = len(tracks)
 
     # Process subsequent frames
-    for t in range(1, len(labeled_images)):
+    for t in range(1, len(phase_images)):
+        # Segment current frame
+        curr_labels = segment_cells(phase_images[t], min_cell_area)
+        labeled_images.append(curr_labels)
+
         prev_labels = labeled_images[t - 1]
-        curr_labels = labeled_images[t]
 
         curr_cell_ids = np.unique(curr_labels)
         curr_cell_ids = curr_cell_ids[curr_cell_ids > 0]
@@ -215,4 +229,4 @@ def track_cells_across_time(
                 tracks[next_track_id] = [(t, int(curr_id))]
                 next_track_id += 1
 
-    return tracks
+    return tracks, labeled_images

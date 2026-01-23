@@ -65,29 +65,35 @@ def run_analysis(
     print(f"  Loaded {len(timepoints)} timepoints")
     print(f"  Time range: {timepoints[0]:.0f} - {timepoints[-1]:.0f} minutes")
 
-    # Step 2: Segment cells and extract fluorescence
-    print("\n[2/5] Segmenting cells and extracting fluorescence...")
+    # Step 2: Segment cells and track across time
+    print("\n[2/5] Segmenting cells and tracking across timepoints...")
+    tracks, labeled_images = fluorescence_extraction.track_cells_across_time(
+        phase_images, min_cell_area
+    )
+    print(f"  Identified {len(tracks)} cell tracks")
+
+    # Step 3: Extract fluorescence from segmented cells
+    print("\n[3/5] Extracting fluorescence from tracked cells...")
     all_cell_data = []
-    labeled_images = []
 
-    for t_idx, (t, intensity_img, phase_img) in enumerate(
-        zip(timepoints, intensity_images, phase_images)
+    for t_idx, (t, intensity_img, labeled) in enumerate(
+        zip(timepoints, intensity_images, labeled_images)
     ):
-        # Segment cells
-        labeled = fluorescence_extraction.segment_cells(phase_img, min_cell_area)
-        labeled_images.append(labeled)
-
         # Extract fluorescence
         cell_fluorescence = fluorescence_extraction.extract_nuclear_cytoplasmic(
             intensity_img, labeled, nuclear_channel, cytoplasmic_channel
         )
 
+        # Get cell IDs from labeled image
+        cell_ids = np.unique(labeled)
+        cell_ids = cell_ids[cell_ids > 0]
+
         # Store data
-        for cell_id, fluor_data in cell_fluorescence.items():
+        for cell_id, fluor_data in zip(cell_ids, cell_fluorescence):
             all_cell_data.append({
                 'timepoint': t,
                 'timepoint_idx': t_idx,
-                'cell_id': cell_id,
+                'cell_id': int(cell_id),
                 'nuclear_pixels': fluor_data['nuclear'],
                 'cytoplasmic_pixels': fluor_data['cytoplasmic'],
             })
@@ -98,11 +104,6 @@ def run_analysis(
         df_cells = pd.DataFrame(all_cell_data)
         df_cells.to_csv(output_path / "raw_fluorescence.csv", index=False)
         print(f"  Saved raw fluorescence to {output_path / 'raw_fluorescence.csv'}")
-
-    # Step 3: Track cells across time
-    print("\n[3/5] Tracking cells across timepoints...")
-    tracks = fluorescence_extraction.track_cells_across_time(labeled_images)
-    print(f"  Identified {len(tracks)} cell tracks")
 
     # Step 4: Convert fluorescence to protein quantities
     print("\n[4/5] Converting fluorescence to protein quantities...")
