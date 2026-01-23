@@ -7,10 +7,10 @@ and extract fluorescence intensity values for each cell and protein.
 
 import numpy as np
 from typing import List, Dict, Tuple
-from skimage import filters, measure, morphology, segmentation
+from skimage import filters, measure, morphology, segmentation, feature
 from scipy import ndimage
-
-
+import repressilator_analysis as ra
+import matplotlib.pyplot as plt
 
 
 def segment_cells(phase_image: np.ndarray, max_nuc_area: int = 5) -> np.ndarray:
@@ -37,11 +37,12 @@ def segment_cells(phase_image: np.ndarray, max_nuc_area: int = 5) -> np.ndarray:
     nuclei=(labelled == 0)
     cytoplasm=(labelled == 1)
     cell=(labelled<2)
-
     regions = measure.regionprops(measure.label(cytoplasm)) 
     #store for each segment
     saved_cells=[]
+
     cell_id_counter = 0
+    counter=1
     #iterate through each contiguous cell element
     for i, region in enumerate(regions):    
         minr, minc, maxr, maxc = region.bbox 
@@ -50,17 +51,40 @@ def segment_cells(phase_image: np.ndarray, max_nuc_area: int = 5) -> np.ndarray:
         cell_crop=cell[minr-0:maxr+0, minc-0:maxc+0]
         nuc_crop=nuclei[minr-0:maxr+0, minc-0:maxc+0]
         connected_labels = measure.label(nuc_crop)   
+        connected_labels = segmentation.clear_border(connected_labels)
         #count the number of nuclei     
         n_regions = connected_labels.max()  
         actual=0
         #check it's not a spurious pixel
+        needs_splitting=[]
         for z in range(0, n_regions):
             cluster=np.sum(connected_labels==(z+1))
             if cluster>max_nuc_area:
                 actual+=1
+                nucleus_region = (connected_labels == (z+1))
+                props = measure.regionprops(measure.label(nucleus_region))[0] 
+                if props.eccentricity>0.8:
+                    actual+=1
+                    needs_splitting+=[z+1]
+        #if there's two merged nuclei they need to be split
+        for label_id in needs_splitting:                                                                                                                                                                             
+            nucleus_mask = (connected_labels == label_id)
+            distance = ndimage.distance_transform_edt(nucleus_mask) 
+            coords = feature.peak_local_max(distance, footprint=np.ones((3, 3)), labels=nucleus_mask)
+            mask = np.zeros(distance.shape, dtype=bool)
+            mask[tuple(coords.T)] = True
+            markers, _ = ndimage.label(mask)
+            watershed_labels = segmentation.watershed(-distance, markers, mask=nucleus_mask)
+            if watershed_labels.max() > 1:                                                                                                                                                                               
+                connected_labels[nucleus_mask] = 0  # Clear old label                                                                                                                                                    
+                max_label = connected_labels.max()                                                                                                                                                                       
+                for new_id in range(1, watershed_labels.max() + 1):                                                                                                                                                      
+                    connected_labels[watershed_labels == new_id] = max_label + new_id
         #more than one nucleus per region -> a bunch of collided cells
         if actual>1:
                 threshed=filters.threshold_otsu(phase_crop)
+                
+
                 cell_mask=  labelled[minr-0:maxr+0, minc-0:maxc+0]<2
                 distance = ndimage.distance_transform_edt(cell_mask)
                 #seperate the cells using distances from the nuclei
@@ -78,13 +102,18 @@ def segment_cells(phase_image: np.ndarray, max_nuc_area: int = 5) -> np.ndarray:
                     nuclei_indices = np.argwhere(nuclei_specific_mask)
                     nuclei_indices[:, 0] += minr
                     nuclei_indices[:, 1] += minc
-                    saved_cells.append({
-                        'bbox': (minr, minc, maxr, maxc),
-                        'mask': cell_indices,
-                        'nmask': nuclei_indices,
-                        'cell_id': cell_id_counter
-                    })
-                    cell_id_counter += 1
+                    position= nuclei_indices.mean(axis=0)
+                    if ra.utils.check_position_dupes(position, [s["centre"] for s in saved_cells]) is False:
+                        if len(cell_indices)!=0 and len(nuclei_indices)!=0:
+                            saved_cells.append({
+                                'bbox': (minr, minc, maxr, maxc),
+                                'mask': cell_indices,
+                                'nmask': nuclei_indices,
+                                'cell_id': cell_id_counter,
+                                "centre" :position
+                            })
+                            
+                            cell_id_counter += 1
         else:
             nuclei_crop = nuclei[minr-0:maxr+0, minc-0:maxc+0]
             nuclei_specific_mask = nuclei_crop & nuc_crop
@@ -95,13 +124,28 @@ def segment_cells(phase_image: np.ndarray, max_nuc_area: int = 5) -> np.ndarray:
             nuclei_indices = np.argwhere(nuclei_specific_mask)
             nuclei_indices[:, 0] += minr
             nuclei_indices[:, 1] += minc
-            saved_cells.append({
-                'bbox': (minr, minc, maxr, maxc),
-                'mask': cell_indices,
-                'nmask': nuclei_indices,
-                'cell_id': cell_id_counter
-            })
-            cell_id_counter += 1
+            position= nuclei_indices.mean(axis=0)
+            if ra.utils.check_position_dupes(position, [s["centre"] for s in saved_cells]) is False:
+                if len(cell_indices)!=0 and len(nuclei_indices)!=0:
+                    saved_cells.append({
+                        'bbox': (minr, minc, maxr, maxc),
+                        'mask': cell_indices,
+                        'nmask': nuclei_indices,
+                        'cell_id': cell_id_counter,
+                        "centre" :position
+                    })
+                    cell_id_counter += 1
+
+    """plt.imshow(phase_image, cmap='gray')
+    all_ids=[c["cell_id"] for c in saved_cells]
+    for old_idx, cell_data in enumerate(saved_cells):
+        centroid = cell_data['centre']
+        
+        plt.text(centroid[1], centroid[0], cell_data["cell_id"],
+                color='red', fontsize=12, fontweight='bold',
+                ha='center', va='center',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+    plt.show()"""
     return saved_cells
 
 
@@ -129,8 +173,6 @@ def extract_nuclear_cytoplasmic(
         Updated labeled_cells lists to include the nuclear and cytosolic intensities
     """
     channel_map = {'red': 0, 'green': 1, 'blue': 2}
-
-    
     nuclear_idx = channel_map[nuclear_channel.lower()]
     nuclear_image = intensity_image[:, :, nuclear_idx]
     cyto_idx = channel_map[cytoplasmic_channel.lower()]

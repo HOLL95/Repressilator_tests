@@ -2,4 +2,6 @@
 markers = [
     "integration: tests the full pipeline",
     "unit: tests individual functions",
+    "short: tests that run quickly",
+    "long: tests that take longer to run",
 ]

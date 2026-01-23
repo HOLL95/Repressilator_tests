@@ -9,3 +9,6 @@ def get_centroid(mask):
     centroid_row = np.mean(mask[:, 0])                                                                                                                                                                
     centroid_col = np.mean(mask[:, 1])
     return [centroid_row, centroid_col]
+def check_position_dupes(centroid, centroid_list, threshold=3):
+    distances=[np.linalg.norm(centroid-x) for x in centroid_list]
+    return any([x<threshold for x in distances])
