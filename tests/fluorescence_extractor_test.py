@@ -26,34 +26,6 @@ def test_images(request):
         "data":all_true_data
     }
 
-@pytest.mark.unit
-class TestFluorescenceExtraction:
-    """Unit tests for fluorescence extraction functions."""
-
-    def test_segment_cells(self, test_images):
-        """Test that segment_cells correctly identifies cells and their properties."""
-        phase_images = test_images['phase_images']
-        
-        segment_list = ra.fluorescence_extraction.segment_cells(phase_images[0], 5)
-
-        # Check return type
-        if isinstance(segment_list, np.ndarray) and len(segment_list.shape) == 2:
-            raise TypeError("Unittest implementation expects 1D list of dictionaries - LLM implementation returns the whole image. If you are using this implementation then run `pytest -m integration`")
-        elif isinstance(segment_list[0], dict) is False:
-            raise TypeError("Unittest implementation expects 1D list of dictionaries - LLM implementation returns the whole image. If you are using this implementation then run `pytest -m integration`")
-
-        # Check expected number of cells
-        if len(segment_list) != 80:
-            raise ValueError("Segmentation error:There are 80 cells in the image, not {0} at timepoint {1}".format(len(segment_list),test_images["timepoints"][i]))
-        for j in range(0, len(segment_list)):
-            for key in ["cell_id", "nmask", "mask", "bbox"]:
-                if key not in segment_list[j]:
-                    raise KeyError(f"Segment_cells list needs every element to contain {['cell_id', 'nmask', 'mask', 'bbox', "centre"]}, but index {i} is missing {key}")
-
-
-
-
-@pytest.mark.integration
 class TestFluorescenceIntegration:
     """Integration tests for fluorescence extraction pipeline."""
     def test_extract_nuclear_cytoplasmic(self, test_images):

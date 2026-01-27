@@ -7,10 +7,14 @@ for Bayesian parameter inference.
 
 import numpy as np
 import pints
-from scipy.integrate import odeint
+from scipy.integrate import solve_ivp
 from typing import List, Tuple, Dict, Optional
-
-
+import matplotlib.pyplot as plt
+from pints.plot import trace
+def d_mrna_dt(mrna, a, a0, protein, hill):
+    return -mrna+(a/(1+protein**hill))+a0
+def d_protein_dt(protein, mrna, beta):
+    return -beta*(protein-mrna)
 class RepressilatorModel(pints.ForwardModel):
     """
     ODE model for the Repressilator genetic circuit.
@@ -31,7 +35,20 @@ class RepressilatorModel(pints.ForwardModel):
     - gamma_m: mRNA degradation rate
     - gamma_p: Protein degradation rate
     """
-
+    _param_names=[
+                    "hill", 
+                    "mrna_half_life",
+                    "p_half_life", 
+                    "K_m", 
+                    "T_e", 
+                    "initial_c_p", 
+                    "initial_n_p_1", 
+                    "initial_n_p_2", 
+                    "initial_c_m", 
+                    "initial_n_m_1",
+                    "initial_n_m_2",
+                    "alpha", 
+                    "alpha0"]
     def __init__(self, times: np.ndarray):
         """
         Initialize the Repressilator model.
@@ -40,17 +57,19 @@ class RepressilatorModel(pints.ForwardModel):
             times: Array of time points for simulation
         """
         self.times = times
+        
+   
 
     def n_parameters(self) -> int:
         """Return the number of model parameters."""
-        return 6  # [alpha, alpha0, beta, n, gamma_m, gamma_p]
+        return len(self._param_names)
 
     def n_outputs(self) -> int:
         """Return the number of observable outputs."""
         # We observe 2 proteins (nuclear and cytoplasmic)
         return 2
 
-    def simulate(self, parameters: List[float], times: np.ndarray) -> np.ndarray:
+    def simulate(self, parameters: List[float], times_in_seconds: np.ndarray) -> np.ndarray:
         """
         Simulate the Repressilator ODE system.
 
@@ -61,196 +80,110 @@ class RepressilatorModel(pints.ForwardModel):
         Returns:
             Array of shape (n_times, n_outputs) with protein concentrations
         """
-        alpha, alpha0, beta, n, gamma_m, gamma_p = parameters
-
-        # Initial conditions (start at equilibrium estimate)
-        y0 = [1.0, 1.0, 1.0, 10.0, 10.0, 10.0]  # [m1, m2, m3, p1, p2, p3]
-
-        def repressilator_odes(y, t):
-            """ODE system for the Repressilator."""
-            m1, m2, m3, p1, p2, p3 = y
-
-            # Hill function for repression
-            def hill_repression(repressor_conc):
-                return alpha / (1 + (repressor_conc ** n)) + alpha0
-
-            # mRNA dynamics
-            dm1_dt = hill_repression(p3) - gamma_m * m1
-            dm2_dt = hill_repression(p1) - gamma_m * m2
-            dm3_dt = hill_repression(p2) - gamma_m * m3
-
-            # Protein dynamics
-            dp1_dt = beta * m1 - gamma_p * p1
-            dp2_dt = beta * m2 - gamma_p * p2
-            dp3_dt = beta * m3 - gamma_p * p3
-
-            return [dm1_dt, dm2_dt, dm3_dt, dp1_dt, dp2_dt, dp3_dt]
-
+        hill, mrna_half_life, p_half_life, K_m, T_e, initial_c_p, initial_n_p_1, initial_n_p_2, initial_c_m, initial_n_m_1, initial_n_m_2, alpha, alpha0=parameters
+        
+        beta=p_half_life/mrna_half_life
+        p_decay=p_half_life/np.log(2)
+        m_decay=mrna_half_life/np.log(2)
+        nd_time=times_in_seconds/(m_decay*60)
+        alpha=alpha*60*p_decay*T_e/K_m
+        alpha0*=alpha
+        y0 = [  initial_n_p_1, initial_n_p_2, initial_c_p, initial_n_m_1, initial_n_m_2,initial_c_m]  # [m1, m2, m3, p1, p2, p3]
         # Solve ODE system
-        solution = odeint(repressilator_odes, y0, times)
-
-        # Extract observable proteins (p1 and p2 as nuclear and cytoplasmic)
-        # Note: p3 is the unobserved protein without fluorescence
-        output = solution[:, [3, 4]]  # [p1, p2]
-
+        solution = solve_ivp(self.repressilator_odes, (0, nd_time[-1]), y0,  args=(alpha, alpha0,hill, beta, K_m), t_eval=nd_time)
+        #nuclear protein 1, cytosolic 1,
+        output=solution.y[[0,2],:].T
+        
         return output
-
-
-class RepressilatorLogLikelihood(pints.ProblemLogLikelihood):
-    """
-    Log-likelihood for Repressilator parameter inference.
-
-    Assumes Gaussian noise on observations.
-    """
-
-    def __init__(
-        self,
-        model: RepressilatorModel,
-        times: np.ndarray,
-        observations: np.ndarray,
-    ):
-        """
-        Initialize log-likelihood.
-
-        Args:
-            model: RepressilatorModel instance
-            times: Time points for observations
-            observations: Observed data of shape (n_times, n_proteins)
-        """
-        super().__init__(pints.SingleOutputProblem(model, times, observations))
-        self.times = times
-        self.observations = observations
-        self.n_times = len(times)
-
-    def __call__(self, parameters: List[float]) -> float:
-        """
-        Calculate log-likelihood for given parameters.
-
-        Args:
-            parameters: Model parameters + noise parameter
-
-        Returns:
-            Log-likelihood value
-        """
-        # Last parameter is noise standard deviation
-        model_params = parameters[:-1]
-        sigma = parameters[-1]
-
-        if sigma <= 0:
-            return -np.inf
-
-        # Simulate model
-        try:
-            predictions = self._model.simulate(model_params, self.times)
-        except Exception:
-            return -np.inf
-
-        # Calculate log-likelihood (assuming Gaussian noise)
-        residuals = self.observations - predictions
-        log_likelihood = -0.5 * np.sum((residuals / sigma) ** 2)
-        log_likelihood -= self.n_times * np.log(sigma)
-        log_likelihood -= 0.5 * self.n_times * np.log(2 * np.pi)
-
-        return log_likelihood
-
-
-def create_prior(parameter_names: List[str]) -> pints.LogPrior:
-    """
-    Create prior distributions for model parameters.
-
-    Args:
-        parameter_names: List of parameter names
-
-    Returns:
-        PINTS prior object
-    """
-    # Define prior bounds (uniform priors)
-    priors = []
-
-    for name in parameter_names:
-        if name == 'alpha':
-            priors.append(pints.UniformLogPrior(0, 1000))
-        elif name == 'alpha0':
-            priors.append(pints.UniformLogPrior(0, 10))
-        elif name == 'beta':
-            priors.append(pints.UniformLogPrior(0, 100))
-        elif name == 'n':
-            priors.append(pints.UniformLogPrior(1, 5))
-        elif name == 'gamma_m':
-            priors.append(pints.UniformLogPrior(0.01, 1))
-        elif name == 'gamma_p':
-            priors.append(pints.UniformLogPrior(0.001, 0.1))
-        elif name == 'sigma':
-            priors.append(pints.UniformLogPrior(0.1, 100))
-        else:
-            priors.append(pints.UniformLogPrior(0, 100))
-
-    return pints.ComposedLogPrior(*priors)
+    def repressilator_odes(self, t,y, *p):
+        """ODE system for the Repressilator."""
+        n_p_1, n_p_2, c_p,  n_m_1, n_m_2,c_m,=y
+        alpha, alpha0,hill_coeff, beta, K_m=p
+        p_i=[x/K_m for x in [n_p_1, n_p_2, c_p]]
+        m_i=[n_m_1, n_m_2, c_m]
+        dps=[0 for _ in range(0, 3)]
+        dms=[0 for _ in range(0, 3)]
+        for i in range(0, 3):
+            dps[i]=d_protein_dt(p_i[i], m_i[i], beta)
+            protein_idx=(i+2)%3
+            dms[i]=d_mrna_dt(m_i[i], alpha, alpha0, p_i[protein_idx], hill_coeff)
+        return dps+dms
 
 
 def infer_parameters(
     times: np.ndarray,
     observations: np.ndarray,
-    n_iterations: int = 1000,
-    n_chains: int = 3,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Infer Repressilator parameters using Bayesian inference (MCMC).
+    Infer Repressilator parameters using CMAES optimization followed by adaptive covariance MCMC.
 
     Args:
         times: Time points (in minutes)
         observations: Observed protein concentrations of shape (n_times, 2)
-        n_iterations: Number of MCMC iterations
-        n_chains: Number of parallel MCMC chains
+        n_iterations: Number of optimization iterations
+        sigma: Noise standard deviation for likelihood calculation
+        n_mcmc_iterations: Number of MCMC iterations
 
     Returns:
-        Tuple of (parameter_samples, parameter_means)
+        Tuple of (mcmc_samples, best_parameters_from_optimization)
     """
     # Create model
     model = RepressilatorModel(times)
 
-    # Create log-likelihood
-    log_likelihood = RepressilatorLogLikelihood(model, times, observations)
+    # Define parameter bounds based on test data analysis
+    # Format: {param_name: (lower_bound, upper_bound)}
+    param_bounds = {
+        "hill": (1.0, 3.0),
+        "mrna_half_life": (1.0, 3.0),
+        "p_half_life": (5.0, 15.0),
+        "K_m": (20.0, 50.0),
+        "T_e": (20.0, 40.0),
+        "initial_c_p": (1.0, 50.0),
+        "initial_n_p_1": (1.0, 50.0),
+        "initial_n_p_2": (1.0, 50.0),
+        "initial_c_m": (5.0, 150.0),
+        "initial_n_m_1": (5.0, 150.0),
+        "initial_n_m_2": (5.0, 150.0),
+        "alpha": (0,1),
+        "alpha0": (0.0005, 0.002)
+    }
 
-    # Create prior
-    parameter_names = ['alpha', 'alpha0', 'beta', 'n', 'gamma_m', 'gamma_p', 'sigma']
-    log_prior = create_prior(parameter_names)
+    # Extract bounds in the correct parameter order
+    lower_bounds = [param_bounds[name][0] for name in model._param_names]+[0, 0]
+    upper_bounds = [param_bounds[name][1] for name in model._param_names]+[1e3, 1e3]
 
-    # Create log-posterior
-    log_posterior = pints.LogPosterior(log_likelihood, log_prior)
+    # Create initial guess (midpoint of bounds)
+    score=-1e23
+    for i in range(0, 2):
+        x0 = [np.random.uniform(low=lower, high=upper, size=1)for lower, upper in zip(lower_bounds, upper_bounds)]
 
-    # Initial parameter guesses
-    initial_params = [
-        [100, 1, 10, 2, 0.1, 0.01, 10],  # Chain 1
-        [200, 0.5, 20, 2.5, 0.2, 0.02, 5],  # Chain 2
-        [150, 2, 15, 1.5, 0.15, 0.015, 8],  # Chain 3
-    ][:n_chains]
+        # Create error measure
 
-    # Run MCMC
-    mcmc = pints.MCMCController(
-        log_posterior,
-        n_chains,
-        initial_params,
-        method=pints.HaarioBardenetACMC
-    )
-    mcmc.set_max_iterations(n_iterations)
-    mcmc.set_log_to_screen(True)
+        problem=pints.MultiOutputProblem(model,times, observations)
+        
+        error = pints.GaussianLogLikelihood(problem )
+        
+        # Create boundaries
+        boundaries = pints.RectangularBoundaries(lower_bounds, upper_bounds)
 
-    print(f"Running MCMC with {n_chains} chains for {n_iterations} iterations...")
-    chains = mcmc.run()
+        # Run CMAES optimization
+        opt = pints.OptimisationController(
+            error,
+            x0,
+            boundaries=boundaries,
+            method=pints.CMAES
+        )
+        opt.set_max_unchanged_iterations(200, threshold=1)
+        opt.set_log_to_screen(True)
+        opt.set_parallel(True)
+        # Run optimization
+        best_params, best_error = opt.run()
+        if best_error>score:
+            score=best_error
+            params=best_params
+    
+    return params[:-2]
 
-    # Extract samples (discard burn-in)
-    burn_in = n_iterations // 2
-    samples = np.vstack([chain[burn_in:] for chain in chains])
-
-    # Calculate parameter means
-    param_means = np.mean(samples, axis=0)
-
-    print("\nInferred parameters:")
-    for name, value in zip(parameter_names, param_means):
-        print(f"  {name}: {value:.4f}")
-
-    return samples, param_means
 
 
 def run_inference_for_cell(
