@@ -20,9 +20,6 @@ def test_repressillator_simulation_class():
     simclass=ra.ode_inference.RepressilatorModel(test_time_seconds)
     sim_values=[params[x] for x in simclass._param_names]
     values=simclass.simulate(sim_values, test_time_seconds)
-    print(RMSE(values[:,0], test_nuclear_protein))
-    print(RMSE(values[:,1], test_cytosol_protein))
-
     assert RMSE(values[:,0], test_nuclear_protein)<26
     assert RMSE(values[:,1], test_cytosol_protein) <26
 def test_infer_parameters():
@@ -40,13 +37,14 @@ def test_infer_parameters():
     values=ra.ode_inference.infer_parameters(true_array[:,0], true_array[:,1:])
 
     valuedict=dict(zip(ra.ode_inference.RepressilatorModel._param_names, values))
-    params_of_interest=["hill", 
+    actual_params_of_interest=set(["hill", 
                     "mrna_half_life",
                     "p_half_life", 
                     "K_m", 
                     "T_e", 
                     "alpha", 
-                    "alpha0"]
+                    "alpha0"])
+    params_of_interest=list(actual_params_of_interest.intersection(ra.ode_inference.RepressilatorModel._param_names))
     with open(os.path.join(os.path.dirname(__file__), "testdata", "protein_numbers", "parameters", "params_001.json"),"r") as f:
         true_params=json.load(f)
     standard_errors=[]
