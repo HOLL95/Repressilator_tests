@@ -342,7 +342,7 @@ for m in range(0, len(timepoints)):
         cyto_image = intensity_images[m][:, :, 1]
         
         thresh=0.05*255
-        bad=True
+        bad=False
         distances=[]
         for i, cell in enumerate(saved_cells):
             cell_id=cell["cell_id"]
@@ -364,7 +364,7 @@ for m in range(0, len(timepoints)):
 
             #    ax2.scatter(true_pos[1], true_pos[0], marker="x", color="green")
             #    ax2.scatter(cell["centre"][1], cell["centre"][0], marker="x", color="red")
-        #print(np.mean(distances), max(distances), np.std(distances))
+        print(np.mean(distances), max(distances), np.std(distances))
         if bad==True:
             print(len(save_trace[-1]), len(saved_cells))
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 7))

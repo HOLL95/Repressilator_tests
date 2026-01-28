@@ -12,6 +12,7 @@ from . import fluorescence_extraction
 from . import calibration
 from . import ode_inference
 from . import utils
+from . import pipeline
 
 __all__ = [
     "image_loader",

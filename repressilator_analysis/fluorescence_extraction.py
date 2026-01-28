@@ -168,6 +168,9 @@ def extract_nuclear_cytoplasmic(
         labeled_cells: List of cells with cytosolic and nuclear masks
         nuclear_channel: Color channel for nuclear fluorescence
         cytoplasmic_channel: Color channel for cytoplasmic fluorescence
+        phase_image: Optional phase contrast image for visualization
+        show_masks: If True, display masks overlaid on phase image
+        timepoint: Timepoint index for display title
 
     Returns:
         Updated labeled_cells lists to include the nuclear and cytosolic intensities
@@ -180,8 +183,8 @@ def extract_nuclear_cytoplasmic(
     for i in range(0,len(labeled_cells)):
         cell_mask = labeled_cells[i]["mask"]
         nuclear_mask=labeled_cells[i]["nmask"]
-        nuclear_intensity = float(np.mean(nuclear_image[nuclear_mask]))       
-        cyto_intensity = float(np.mean(cyto_image[cell_mask]))
+        nuclear_intensity = float(np.mean(nuclear_image[nuclear_mask[:, 0], nuclear_mask[:, 1]]))
+        cyto_intensity = float(np.mean(cyto_image[cell_mask[:, 0], cell_mask[:, 1]]))
 
         labeled_cells[i]["n_intensity"]=nuclear_intensity
         labeled_cells[i]["c_intensity"]=cyto_intensity

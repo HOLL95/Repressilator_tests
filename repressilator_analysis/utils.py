@@ -12,3 +12,5 @@ def get_centroid(mask):
 def check_position_dupes(centroid, centroid_list, threshold=3):
     distances=[np.linalg.norm(centroid-x) for x in centroid_list]
     return any([x<threshold for x in distances])
+def RMSE(x,y):
+    return np.sqrt(np.mean(np.square(np.subtract(x,y))))
