@@ -17,6 +17,22 @@ def test_extraction():
         intensity_dir, phase_dir
     )
     tracks=ra.fluorescence_extraction.track_cells_across_time(phase_images, 5)
+    if isinstance(tracks, tuple):
+        extraction_arg=tracks
+        labelled_images=tracks[0]
+        new_tracks=[[] for x in range(0,len(phase_images))]
+        for i in range(0,len(phase_images)):
+            for key in tracks[0].keys():
+                for elem in tracks[0][key]:
+                    if elem[0]==i:
+                        new_tracks[i].append({"cell_id":int(key), "centre":list(elem[2])})
+        tracks=new_tracks
+    else:
+        extraction_arg=tracks
+    for i in range(0, len(tracks)):
+        if len(tracks[i])!=80:
+            raise ValueError(f"At timepoint {i} there are {len(tracks[i])} tracked cells rather than 80")
+
     positions=actual_data[:80,8:]
     indices=list(actual_data[:80,6])
     cost_matrix=np.zeros((len(tracks[0]), len(tracks[0])))
@@ -29,7 +45,7 @@ def test_extraction():
     backmapping={indices[x]:tracks[0][y]["cell_id"] for x,y in zip(row_ind, col_ind)}  
     calibrant_files=[os.path.join(os.path.dirname(__file__), os.pardir, "docs", x) for x in calibrant_names]
     recovered_numbers=ra.pipeline.extract_protein_numbers_from_tracks(
-        tracks,
+        extraction_arg,
         intensity_dir, phase_dir, calibration_files=calibrant_files,weights=weights,
         track_labels=["n_intensity", "c_intensity"],calibration_headers=1,
         output_dir=None)
@@ -42,7 +58,7 @@ def test_extraction():
             actual_values=protein_values[idx, m]
             
             #index in tracks where the cell id corresponds to the appropriate index
-            recovered_col=[x for x in range(0, len(tracks[0])) if tracks[0][x]["cell_id"]==backmapping[i]][0]
+            recovered_col=[x for x in range(0, len(tracks[0])) if tracks[0][x]["cell_id"]==backmapping[int(i)]][0]
             calculated_values=recovered_numbers[:,recovered_col, m]
             error=ra.utils.RMSE(calculated_values, actual_values[0])
             errors.append(error)
@@ -50,3 +66,4 @@ def test_extraction():
 
 
     
+test_extraction()
