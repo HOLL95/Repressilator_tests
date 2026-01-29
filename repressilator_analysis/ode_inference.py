@@ -93,7 +93,6 @@ class RepressilatorModel(pints.ForwardModel):
         solution = solve_ivp(self.repressilator_odes, (0, nd_time[-1]), y0,  args=(alpha, alpha0,hill, beta, K_m), t_eval=nd_time)
         #nuclear protein 1, cytosolic 1,
         output=solution.y[[0,2],:].T
-        
         return output
     def repressilator_odes(self, t,y, *p):
         """ODE system for the Repressilator."""
@@ -154,7 +153,7 @@ def infer_parameters(
 
     # Create initial guess (midpoint of bounds)
     score=-1e23
-    for i in range(0, 2):
+    for i in range(0,5):
         x0 = [np.random.uniform(low=lower, high=upper, size=1)for lower, upper in zip(lower_bounds, upper_bounds)]
 
         # Create error measure
@@ -173,7 +172,7 @@ def infer_parameters(
             boundaries=boundaries,
             method=pints.CMAES
         )
-        opt.set_max_unchanged_iterations(200, threshold=1)
+        opt.set_max_unchanged_iterations(200, threshold=1e-1)
         opt.set_log_to_screen(True)
         opt.set_parallel(True)
         # Run optimization
@@ -185,41 +184,3 @@ def infer_parameters(
     return params[:-2]
 
 
-
-def run_inference_for_cell(
-    times: np.ndarray,
-    cell_data: Dict[str, List[float]],
-    n_iterations: int = 1000,
-) -> Dict[str, any]:
-    """
-    Run parameter inference for a single cell's time-series data.
-
-    Args:
-        times: Time points in minutes
-        cell_data: Dictionary with 'nuclear' and 'cytoplasmic' protein concentrations
-        n_iterations: Number of MCMC iterations
-
-    Returns:
-        Dictionary with inference results
-    """
-    # Prepare observations
-    nuclear = np.array(cell_data.get('nuclear', []))
-    cytoplasmic = np.array(cell_data.get('cytoplasmic', []))
-
-    if len(nuclear) == 0 or len(cytoplasmic) == 0:
-        raise ValueError("Cell data must contain 'nuclear' and 'cytoplasmic' measurements")
-
-    observations = np.column_stack([nuclear, cytoplasmic])
-
-    # Run inference
-    samples, param_means = infer_parameters(times, observations, n_iterations)
-
-    results = {
-        'times': times,
-        'observations': observations,
-        'parameter_samples': samples,
-        'parameter_means': param_means,
-        'parameter_names': ['alpha', 'alpha0', 'beta', 'n', 'gamma_m', 'gamma_p', 'sigma'],
-    }
-
-    return results

@@ -19,17 +19,17 @@ from . import image_loader
 from . import fluorescence_extraction
 from . import calibration
 from . import ode_inference
+from . import pipeline
 
 def extract_protein_numbers_from_tracks(
     tracks,
-    intensity_dir: str = "images/intensity",
-    phase_dir: str = "images/phase",
+    timepoints, 
+    intensity_images,
+    phase_images,
     weights: list=[],
     calibration_files=[],
     calibration_headers=0,
     track_labels=["n_intensity", "c_intensity"],
-    output_dir: str = None,
-    show_masks: bool = True,
 ):
     """
     Run the complete Repressilator analysis pipeline.
@@ -48,19 +48,10 @@ def extract_protein_numbers_from_tracks(
     Returns:
         Dictionary containing all analysis results
     """
-
-    # Create output directory
-    if output_dir is not None:
-        output_path = Path(output_dir)
-        output_path.mkdir(exist_ok=True)
     calibrators=[]
     for i in range(0, len(calibration_files)):
         calibrators.append(calibration.ProteinCalibration(calibration_files[i], weights[i], header=calibration_headers))
     # Step 1: Load images
-    print("\n[1/5] Loading time-series images...")
-    timepoints, intensity_images, phase_images = image_loader.load_timeseries(
-        intensity_dir, phase_dir
-    )
     get_all_cell_ids=[x["cell_id"] for x in tracks[0]]
     intensities=np.zeros((len(timepoints), len(tracks[0]), 2))
     molecule_numbers=np.zeros((len(timepoints), len(tracks[0]), 2))
@@ -78,6 +69,27 @@ def extract_protein_numbers_from_tracks(
             molecule_numbers[:,j, m]=calibrators[m].pixel_intensities_to_molecules(intensities[:,j,m])
     return molecule_numbers
 
+def full_analysis(intensity_dir, phase_dir, calibration_info, cell_ids, min_cell_area=5):
+    timepoints, intensity_images, phase_images = image_loader.load_timeseries(
+        intensity_dir, phase_dir
+    )
+    tracks=fluorescence_extraction.track_cells_across_time(phase_images, min_cell_area)
+    protein_numbers=pipeline.extract_protein_numbers_from_tracks(
+                                                            tracks,
+                                                            timepoints, 
+                                                            intensity_images,
+                                                            phase_images,
+                                                            calibration_info["weights"],
+                                                            calibration_info["files"],
+                                                            calibration_info["headers"],
+                                                            track_labels=["n_intensity", "c_intensity"],
+                                                            )
+    return_arg={}
+    for c in cell_ids:
+        observations=protein_numbers[:,c,:]
+        recovered_parameters=ode_inference.infer_parameters(np.multiply(timepoints, 60), observations)
+        return_arg[c]=recovered_parameters
+    return tracks, protein_numbers, return_arg    
 
         
 
