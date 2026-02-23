@@ -230,10 +230,7 @@ See `tests/README.md` for detailed testing documentation.
 
 - Elowitz, M. B., & Leibler, S. (2000). A synthetic oscillatory network of transcriptional regulators. *Nature*, 403(6767), 335-338. (See `docs/35002125.pdf`)
 
-## License
 
-[Specify license here]
 
-## Contributing
 
-[Contributing guidelines]
+
