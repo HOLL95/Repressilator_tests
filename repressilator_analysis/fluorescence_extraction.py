@@ -33,8 +33,8 @@ def segment_cells(phase_image: np.ndarray, min_cell_area: int = 50) -> np.ndarra
     binary = gray < threshold  # Cells are typically darker in phase contrast
 
     # Clean up binary image
-    binary = morphology.remove_small_objects(binary, min_size=min_cell_area)
-    binary = morphology.remove_small_holes(binary, area_threshold=min_cell_area)
+    binary = morphology.remove_small_objects(binary, max_size=min_cell_area)
+    binary = morphology.remove_small_holes(binary, max_size=min_cell_area)
 
     # Label connected components
     labeled = measure.label(binary)
