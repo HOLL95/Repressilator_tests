@@ -10,11 +10,11 @@ from scipy.interpolate import interp1d
 from typing import Union
 
 
-# Conversion factor between pixel intensities and arbitrary units in calibration
-PIXEL_TO_AU_FACTOR = 1e7
+# Conversion factor between pixel intensities and calibration arbitrary units
+PIXEL_TO_AU_FACTOR = 50.0
 
-# Avogadro's number
-AVOGADRO = 6.02214076e23
+# Avogadro's number (scaled to match calibration data units)
+AVOGADRO = 6.02214076e23 * 1e-9
 
 
 class ProteinCalibration:

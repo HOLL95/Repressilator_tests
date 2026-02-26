@@ -11,7 +11,6 @@ import pytest
 import numpy as np
 import os
 import repressilator_analysis as ra
-import matplotlib.pyplot as plt
 from test_utils import map_true_indices_to_tracks
 from scipy.optimize import linear_sum_assignment
 
@@ -123,4 +122,3 @@ def test_track_cells():
 
             if np.mean(best_distances) > 5 or np.std(best_distances) > 6:
                 raise ValueError(f"At timepoint {i}, fluorescence value extraction in {keys[j]} over distance threshold to true value (mean difference {np.mean(best_distances)}, s.d. {np.std(best_distances)})")
-

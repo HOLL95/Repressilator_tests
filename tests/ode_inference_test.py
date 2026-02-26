@@ -12,7 +12,6 @@ import pytest
 import numpy as np
 import os
 import repressilator_analysis as ra
-import matplotlib.pyplot as plt
 import json
 import pints
 

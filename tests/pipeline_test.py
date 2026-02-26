@@ -11,7 +11,6 @@ import pytest
 import numpy as np
 import os
 import repressilator_analysis as ra
-import matplotlib.pyplot as plt
 import json
 from test_utils import map_true_indices_to_tracks
 

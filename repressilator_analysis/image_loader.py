@@ -14,23 +14,23 @@ from PIL import Image
 
 def parse_timepoint(filename: str) -> float:
     """
-    Extract the timepoint in minutes from a filename.
+    Extract the timepoint in seconds from a filename.
 
     Args:
         filename: Image filename in format 'sample_t+{time}m.png'
 
     Returns:
-        Time in minutes as a float
+        Time in seconds as a float
 
     Examples:
         >>> parse_timepoint('sample_t+75m.png')
-        75.0
+        4500.0
         >>> parse_timepoint('sample_t+1200m_phase.png')
-        1200.0
+        72000.0
     """
     match = re.search(r't\+(\d+)m', filename)
     if match:
-        return float(match.group(1))
+        return float(match.group(1)) * 60.0
     raise ValueError(f"Could not parse timepoint from filename: {filename}")
 
 
@@ -91,7 +91,7 @@ def load_timeseries(
 
     Returns:
         Tuple of:
-            - timepoints: List of timepoints in minutes
+            - timepoints: List of timepoints in seconds
             - intensity_images: List of intensity image arrays
             - phase_images: List of phase contrast image arrays
     """
